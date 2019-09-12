@@ -600,3 +600,28 @@ class DAGPool(object):
                     for key, pending in ((key, (coro.pending - available))
                                          for key, coro in six.iteritems(self.coros))
                     if pending)
+
+    def pending(self, key):
+        """
+        For the greenthread identified by *key*, return the set of its original
+        upstream dependencies that have not yet been delivered.
+
+        :meth:`waiting_for(key) <DAGPool.waiting_for>` returns the set of keys
+        for which results are not yet available, that is, the set of keys for
+        which coroutine *key* must literally wait. pending(key) returns the
+        set of keys it hasn't yet consumed, whether or not they're currently
+        available.
+        """
+        try:
+            coro = self.coros[key]
+        except KeyError:
+            # No running greenthread with that key -- is that because it
+            # finished? If we also don't have a value for it, then we've never
+            # heard of it; let the KeyError propagate.
+            self.values[key]
+            # greenthread finished, everything has been delivered
+            return set()
+        else:
+            # coro.pending is the set of keys that have not yet been delivered
+            # -- but copy it so caller can't modify the official set
+            return coro.pending.copy()

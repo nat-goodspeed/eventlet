@@ -336,6 +336,9 @@ def test_spawn_multiple():
     with assert_raises(KeyError):
         pool.waiting_for("j")
     assert_equals(pool.waiting_for("h"), set("defg"))
+    for k in "defg":
+        assert_equals(pool.pending(k), set())
+    assert_equals(pool.pending("h"), set("defg"))
 
     # let one of the upstream greenthreads complete
     events["f"].send("fval")
@@ -348,6 +351,7 @@ def test_spawn_multiple():
     assert_equals(set(pool.running_keys()), set("degh"))
     assert_equals(pool.waiting(), 1)
     assert_equals(pool.waiting_for("h"), set("deg"))
+    assert_equals(pool.pending("h"), set("deg"))
 
     # now two others
     events["e"].send("eval")
@@ -363,6 +367,7 @@ def test_spawn_multiple():
     assert_equals(set(pool.running_keys()), set("dh"))
     assert_equals(pool.waiting(), 1)
     assert_equals(pool.waiting_for("h"), set("d"))
+    assert_equals(pool.pending("h"), set("d"))
 
     # last one
     events["d"].send("dval")
@@ -378,6 +383,7 @@ def test_spawn_multiple():
     assert_false(pool.running_keys())
     assert_equals(pool.waiting(), 0)
     assert_equals(pool.waiting_for("h"), set())
+    assert_equals(pool.pending("h"), set())
 
     capture.validate([
         ["h got b", "h got c"],
@@ -387,6 +393,41 @@ def test_spawn_multiple():
         ["d returning dval", "h got d", "h returning hval"],
         [],
     ])
+
+
+def test_pending_consume():
+    pool = DAGPool()
+    events = {}
+    # spawn consumer that must wait for both "a" and "b"
+    pool.spawn("c", "ab", pending_consume, pool)
+    pool.waitall()
+
+
+def pending_consume(key, results, pool):
+    # We happen to know our upstream dependencies. Neither is available yet.
+    assert_equals(pool.pending(key), set("ab"))
+    # make "a" available
+    pool.post("a", "aval")
+    # Here's the difference between waiting_for(key) and pending(key):
+    # "a" is now available, so we're only waiting for "b"
+    assert_equals(pool.waiting_for(key), set("b"))
+    # but since neither result has been retrieved yet, both are still pending()
+    assert_equals(pool.pending(key), set("ab"))
+    k, v = next(results)
+    assert_equals(k, "a")
+    assert_equals(v, "aval")
+    # now that we've retrieved the "a" result, only "b" still pending
+    assert_equals(pool.pending(key), set("b"))
+    # post "b" result
+    pool.post("b", "bval")
+    assert_equals(pool.waiting_for(key), set())
+    assert_equals(pool.pending(key), set("b"))
+    k, v = next(results)
+    assert_equals(k, "b")
+    assert_equals(v, "bval")
+    assert_equals(pool.pending(key), set())
+    with assert_raises(StopIteration):
+        next(results)
 
 
 def spawn_many_func(key, results, capture, pool):
